@@ -18,13 +18,20 @@
 
 package io.github.schm1tz1;
 
+import io.confluent.kafka.serializers.json.KafkaJsonSchemaDeserializer;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.kafka.common.serialization.StringDeserializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
 
 /**
  * Skeleton for a Flink DataStream Job.
@@ -40,26 +47,41 @@ import org.apache.kafka.common.serialization.StringDeserializer;
  */
 public class DataStreamJob {
 
+    private static final Logger logger = LoggerFactory.getLogger(DataStreamJob.class);
+
+    private static Map<String, String> createSerdeConfig(Properties props, Class dataClass) {
+        Map<String, String> config = new HashMap<>();
+        props.forEach((key, value) -> config.put(key.toString(), value.toString()));
+        config.put("json.value.type", dataClass.getName());
+        return config;
+    }
+
     public static void main(String[] args) throws Exception {
 
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         var kafkaSourceProps = FlinkConfigTools.readPropertiesFiles("/Users/rschmitz/workspace/clients/ccloud-basic.properties");
+        var serDeConfig = createSerdeConfig(kafkaSourceProps, PageviewValue.class);
 
-        KafkaSource<String> source =
-                KafkaSource.<String>builder()
+        var typeInfo = TypeInformation.of(PageviewValue.class);
+        logger.info(typeInfo.toString());
+
+        KafkaSource<PageviewValue> source =
+                KafkaSource.<PageviewValue>builder()
                         .setProperties(kafkaSourceProps)
                         .setTopics("pageviews")
                         .setGroupId("flink-group")
                         .setStartingOffsets(OffsetsInitializer.earliest())
                         .setDeserializer(
-                                KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class)
+                            KafkaRecordDeserializationSchema.valueOnly(PageviewDeserializer.class, serDeConfig)
                         )
                         .build();
 
-        DataStreamSource<String> stream =
+        DataStreamSource<PageviewValue> stream =
                 env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source");
-        stream.print();
+
+        stream
+            .print();
 
         // Execute program, beginning computation.
         env.execute("Flink Test Application");
